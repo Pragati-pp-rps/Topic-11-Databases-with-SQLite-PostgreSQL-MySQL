@@ -1,0 +1,294 @@
+{
+  "name": "Lesson5_Database_Integration_Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "06a864b3-f3c4-49f3-8522-bcae78dd4805",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nWITH next_lead AS (\n    SELECT id\n    FROM public.order_leads\n    WHERE lead_status = 'pending'\n    ORDER BY id ASC\n    LIMIT 1\n    FOR UPDATE SKIP LOCKED\n)\nUPDATE public.order_leads AS ol\nSET\n    lead_status = 'processing',\n    updated_at = NOW()\nFROM next_lead\nWHERE ol.id = next_lead.id\nRETURNING\n    ol.id,\n    ol.customer_email,\n    ol.customer_name,\n    ol.product,\n    ol.quantity,\n    ol.lead_status;\n\n",
+        "options": {}
+      },
+      "id": "30b946cf-294a-42c3-ab97-f5b756a08b5d",
+      "name": "SQL_FetchAndLockRow",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        0
+      ],
+      "alwaysOutputData": false,
+      "credentials": {
+        "postgres": {
+          "id": "TCpwyMALQ2hX4Vct",
+          "name": "Pragati Postgres"
+        }
+      },
+      "notes": "Atomically selects ONE pending lead using FOR UPDATE SKIP LOCKED and flips it to 'processing' in the same statement, so concurrent executions never grab the same row."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ACTION_ProcessOrder: business logic placeholder for the locked order lead\nconst results = [];\n\nfor (const item of $input.all()) {\n  const lead = item.json;\n\n  results.push({\n    json: {\n      ...lead,\n      customer_email: String(lead.customer_email || '').trim().toLowerCase(),\n      customer_name: String(lead.customer_name || '').trim(),\n      processed_at: new Date().toISOString(),\n      process_result: `Order for ${lead.quantity} x ${lead.product} processed`\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "9f0b205d-9a96-419e-bd39-5052fe851d2a",
+      "name": "ACTION_ProcessOrder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        0
+      ],
+      "notes": "Normalises email (lowercase/trim) so the upsert key is consistent, and performs order processing logic."
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "order_leads",
+          "mode": "list",
+          "cachedResultName": "order_leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "customer_email": "={{ $json.customer_email }}",
+            "id": 1,
+            "customer_name": "={{ $json.customer_name }}",
+            "quantity": "={{ $json.quantiy }}",
+            "product": "={{ $json.product }}",
+            "lead_status": "={{ $json.lead_status }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "product",
+              "displayName": "product",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "quantity",
+              "displayName": "quantity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "23c71560-5c84-4d2c-9a51-e0a893a81d7a",
+      "name": "SQL_UpdateStatusCompleted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        944,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "TCpwyMALQ2hX4Vct",
+          "name": "Pragati Postgres"
+        }
+      },
+      "notes": "Sets lead_status = 'completed' after successful processing. Parameterised ($1) to prevent SQL injection."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0283221e-4629-4651-9758-63d18488e3e8",
+              "name": "customer_name",
+              "value": "Pragati",
+              "type": "string"
+            },
+            {
+              "id": "8eae05c5-02f7-4c34-9454-9d821389885b",
+              "name": "customer_email",
+              "value": "pragati96patra@gmail.com",
+              "type": "string"
+            },
+            {
+              "id": "18afcdac-4e94-496e-abeb-b76c7002ca5e",
+              "name": "product",
+              "value": "Iphone15",
+              "type": "string"
+            },
+            {
+              "id": "b4ae677c-2e7d-469d-9ea4-76edd7e0ae47",
+              "name": "quantiy",
+              "value": "10",
+              "type": "string"
+            },
+            {
+              "id": "506102d4-4083-4e07-9b35-8a5fe017de6b",
+              "name": "lead_status",
+              "value": "Confirmed",
+              "type": "string"
+            },
+            {
+              "id": "48ae965e-7fd9-46cf-8615-6a25f995ef6a",
+              "name": "created_at",
+              "value": "={{$now.toISO()}}  ",
+              "type": "string"
+            },
+            {
+              "id": "34ee7ab4-63d2-4f9a-9234-1a4d39fa42a9",
+              "name": "updated_at",
+              "value": "={{$now.toISO()}}\n ",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        464,
+        0
+      ],
+      "id": "3730f0c8-addd-4d1e-8069-81d0f29c2065",
+      "name": "Edit Fields"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "SQL_FetchAndLockRow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SQL_FetchAndLockRow": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ACTION_ProcessOrder": {
+      "main": [
+        [
+          {
+            "node": "SQL_UpdateStatusCompleted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "ACTION_ProcessOrder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6f1c5b7e-6f3e-4e3a-bb7f-b491fa739f32",
+  "meta": {
+    "instanceId": "a03c7678428ef19ededbf912f16f7d5798ec7b9ab4c17f2a2def6a9e791e7215"
+  },
+  "nodeGroups": [],
+  "id": "Pz0cKOMeDvlGC9Mx",
+  "tags": []
+}
